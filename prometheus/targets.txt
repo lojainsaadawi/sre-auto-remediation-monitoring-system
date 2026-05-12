@@ -1,0 +1,18 @@
+[
+  {
+    "targets": ["172.20.0.1:9101"],
+    "labels": {
+      "vm_name": "edge-node-1",
+      "zone": "zone1",
+      "vm_id": "6e6147b2-cb97-4436-a0b8-0f4c76daac4d"
+    }
+  },
+  {
+    "targets": ["172.20.0.1:9102"],
+    "labels": {
+      "vm_name": "edge-node-2",
+      "zone": "zone2",
+      "vm_id": "a30f7f11-64d6-4788-a04c-830b50f3bebc"
+    }
+  }
+]

@@ -1,0 +1,151 @@
+# =============================================================
+# Prometheus Alert Rules — Edge Monitoring SRE Platform
+# Graduated response: warning → moderate → critical → emergency
+# =============================================================
+
+groups:
+
+  # -----------------------------------------------------------
+  # Heartbeat and Availability Alerts
+  # -----------------------------------------------------------
+  - name: edge_availability
+    rules:
+
+      - alert: EdgeNodeDown
+        expr: absent(edge_heartbeat{job="edge_nodes"}) or edge_heartbeat{job="edge_nodes"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          instance: "{{ $labels.instance }}"
+          zone: "{{ $labels.zone }}"
+        annotations:
+          summary: "Edge node is down"
+          description: "Edge node {{ $labels.instance }} ({{ $labels.zone }}) heartbeat absent for 30s. Possible service crash or VM shutdown."
+
+      - alert: EdgeNodeHighLatency_Warning
+        expr: edge_processing_latency_last_ms{job="edge_nodes"} > 60
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Edge node latency warning"
+          description: "Edge node {{ $labels.instance }} ({{ $labels.zone }}) processing latency is {{ $value }}ms — above 60ms warning threshold."
+
+      - alert: EdgeNodeHighLatency_Moderate
+        expr: edge_processing_latency_last_ms{job="edge_nodes"} > 75
+        for: 1m
+        labels:
+          severity: moderate
+        annotations:
+          summary: "Edge node latency moderate"
+          description: "Edge node {{ $labels.instance }} ({{ $labels.zone }}) processing latency is {{ $value }}ms — above 75ms moderate threshold. Running local optimizations."
+
+      - alert: EdgeNodeHighLatency_Critical
+        expr: edge_processing_latency_last_ms{job="edge_nodes"} > 85
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Edge node latency critical"
+          description: "Edge node {{ $labels.instance }} ({{ $labels.zone }}) processing latency is {{ $value }}ms — above 85ms critical threshold. Redistributing load."
+
+      - alert: EdgeNodeHighLatency_Emergency
+        expr: edge_processing_latency_last_ms{job="edge_nodes"} > 95
+        for: 30s
+        labels:
+          severity: emergency
+        annotations:
+          summary: "Edge node latency EMERGENCY"
+          description: "Edge node {{ $labels.instance }} ({{ $labels.zone }}) processing latency is {{ $value }}ms — above 95ms emergency threshold. Human override activated."
+
+  # -----------------------------------------------------------
+  # CPU Load Alerts
+  # -----------------------------------------------------------
+  - name: edge_cpu
+    rules:
+
+      - alert: EdgeNodeCPU_Warning
+        expr: >
+          (100 - (avg by (instance, zone, vm_id)
+          (irate(node_cpu_seconds_total{mode="idle", job="edge_nodes"}[2m])) * 100)) > 60
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Edge node CPU warning"
+          description: "Edge node {{ $labels.instance }} ({{ $labels.zone }}) CPU usage is {{ $value }}% — above 60% warning threshold."
+
+      - alert: EdgeNodeCPU_Moderate
+        expr: >
+          (100 - (avg by (instance, zone, vm_id)
+          (irate(node_cpu_seconds_total{mode="idle", job="edge_nodes"}[2m])) * 100)) > 75
+        for: 2m
+        labels:
+          severity: moderate
+        annotations:
+          summary: "Edge node CPU moderate"
+          description: "Edge node {{ $labels.instance }} ({{ $labels.zone }}) CPU usage is {{ $value }}% — above 75% moderate threshold."
+
+      - alert: EdgeNodeCPU_Critical
+        expr: >
+          (100 - (avg by (instance, zone, vm_id)
+          (irate(node_cpu_seconds_total{mode="idle", job="edge_nodes"}[2m])) * 100)) > 85
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Edge node CPU critical"
+          description: "Edge node {{ $labels.instance }} ({{ $labels.zone }}) CPU usage is {{ $value }}% — above 85% critical threshold."
+
+      - alert: EdgeNodeCPU_Emergency
+        expr: >
+          (100 - (avg by (instance, zone, vm_id)
+          (irate(node_cpu_seconds_total{mode="idle", job="edge_nodes"}[2m])) * 100)) > 95
+        for: 1m
+        labels:
+          severity: emergency
+        annotations:
+          summary: "Edge node CPU EMERGENCY"
+          description: "Edge node {{ $labels.instance }} ({{ $labels.zone }}) CPU usage is {{ $value }}% — above 95% emergency threshold. Human override activated."
+
+  # -----------------------------------------------------------
+  # SRE — Error Budget Burn Rate
+  # -----------------------------------------------------------
+  - name: sre_error_budget
+    rules:
+
+      # Recording rules for SLA calculation
+      - record: edge:uptime_ratio:1h
+        expr: >
+          avg_over_time(edge_heartbeat{job="edge_nodes"}[1h])
+
+      - record: edge:sla:current
+        expr: >
+          avg by (instance, zone) (edge:uptime_ratio:1h) * 100
+
+      - record: edge:error_budget:remaining
+        expr: >
+          edge:sla:current - 99.9
+
+      - record: edge:burn_rate:1h
+        expr: >
+          (99.9 - edge:sla:current) / 0.1
+
+      # Alert when burn rate is too high
+      - alert: ErrorBudgetBurnRateHigh
+        expr: edge:burn_rate:1h > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Error Budget burn rate elevated"
+          description: "Edge node {{ $labels.instance }} ({{ $labels.zone }}) is burning Error Budget at {{ $value }}x rate. SLA target may be missed."
+
+      - alert: ErrorBudgetExhausted
+        expr: edge:error_budget:remaining < 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Error Budget exhausted"
+          description: "Edge node {{ $labels.instance }} ({{ $labels.zone }}) has exhausted its Error Budget. Current SLA: {{ $value }}%"

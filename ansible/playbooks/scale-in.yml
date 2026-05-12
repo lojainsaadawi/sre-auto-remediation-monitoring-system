@@ -1,0 +1,174 @@
+---
+# =============================================================
+# scale-in.yml — Powers off VM3 after recovery
+# =============================================================
+
+- name: "Scale-In — Power Off VM3"
+  hosts: localhost
+  gather_facts: yes
+
+  vars:
+    prometheus_url:   "http://172.20.0.20:9090"
+    warning_threshold: 60
+    controller_ip:    "192.168.122.55"
+    openrc_file:      "/root/bin/edge-monitoring-openrc.sh"
+    vm3_name:         "edge-node-3"
+    vm3_floating_ip:  "10.0.10.160"
+    vm1_name:         "edge-node-1"
+    vm1_floating_ip:  "10.0.10.153"
+    event_log:        "/home/lojain/observability-stack/events/events.csv"
+
+  tasks:
+
+    - name: "Check current latency"
+      uri:
+        url: "{{ prometheus_url }}/api/v1/query?query=edge_processing_latency_last_ms%7Bjob%3D%22edge_nodes%22%7D"
+        method: GET
+        return_content: yes
+      register: current_latency
+      ignore_errors: yes
+
+    - name: "Display current latency"
+      debug:
+        msg: "Current metrics: {{ current_latency.json.data.result | default([]) }}"
+
+    - name: "Restore all sensors to normal 5s interval"
+      shell: |
+        for zone in zone1 zone2; do
+          for type in temperature humidity light pressure; do
+            for i in 01 02 03; do
+              container="sensor-${type}-${zone}-${i}"
+              if docker ps -q -f name="^${container}$" | grep -q .; then
+                current=$(docker inspect "$container" \
+                  --format '{{ "{{" }}range .Config.Env{{ "}}" }}{{ "{{" }}println .{{ "}}" }}{{ "{{" }}end{{ "}}" }}' \
+                  2>/dev/null | grep INTERVAL | cut -d= -f2 || echo "5")
+                if [ "$current" != "5" ]; then
+                  docker rm -f "$container" > /dev/null 2>&1
+                  docker run -d \
+                    --name "$container" \
+                    --restart unless-stopped \
+                    --network host \
+                    -e SENSOR_ID="${type}-${zone}-${i}" \
+                    -e ZONE="${zone}" \
+                    -e TYPE="$type" \
+                    -e INTERVAL="5" \
+                    -e BROKER_IP="172.20.0.10" \
+                    -e BROKER_PORT="1883" \
+                    virtual-sensor:latest > /dev/null 2>&1
+                  echo "Restored: $container"
+                fi
+              fi
+            done
+          done
+        done
+        echo "All sensors at normal interval"
+      register: restore_result
+      changed_when: true
+      ignore_errors: yes
+
+    - name: "Stop VM3 edge-node service"
+      shell: |
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          -i /home/lojain/.ssh/edge-key.pem \
+          -o ProxyJump=root@{{ controller_ip }} \
+          ubuntu@{{ vm3_floating_ip }} \
+          "sudo systemctl stop edge-node && sudo systemctl disable edge-node" 2>/dev/null || true
+        echo "VM3 service stopped"
+      changed_when: true
+      ignore_errors: yes
+
+    - name: "Disassociate VM3 floating IP"
+      shell: |
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          root@{{ controller_ip }} \
+          "source {{ openrc_file }} && \
+           openstack server remove floating ip {{ vm3_name }} {{ vm3_floating_ip }} 2>/dev/null || true && \
+           echo 'Floating IP disassociated'"
+      register: fip_remove
+      changed_when: true
+      ignore_errors: yes
+
+    - name: "Power off VM3"
+      shell: |
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          root@{{ controller_ip }} \
+          "source {{ openrc_file }} && \
+           openstack server stop {{ vm3_name }} && \
+           echo 'VM3 stop command issued'"
+      register: vm3_stop
+      changed_when: true
+      ignore_errors: yes
+
+    - name: "Ensure VM1 is running and healthy"
+      shell: |
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          root@{{ controller_ip }} \
+          "source {{ openrc_file }} && openstack server start {{ vm1_name }}"
+      register: vm1_check
+      changed_when: true
+      ignore_errors: yes
+
+    - name: "Wait for VM1 to reach ACTIVE state"
+      shell: |
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          root@{{ controller_ip }} \
+          "source {{ openrc_file }} && \
+           for i in \$(seq 1 24); do \
+             STATUS=\$(openstack server show {{ vm1_name }} -f value -c status 2>/dev/null); \
+             echo \"Attempt \$i: \$STATUS\"; \
+             [ \"\$STATUS\" = 'ACTIVE' ] && exit 0; \
+             sleep 5; \
+           done; exit 1"
+      register: vm1_status
+      changed_when: false
+      ignore_errors: yes
+
+    - name: "Wait for SSH port 22 on VM1"
+      shell: |
+        for i in $(seq 1 24); do
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=5 \
+            -i /home/lojain/.ssh/edge-key.pem \
+            -o ProxyJump=root@{{ controller_ip }} \
+            ubuntu@{{ vm1_floating_ip }} "echo OK" 2>/dev/null && exit 0
+          echo "Attempt $i: SSH not ready yet..."
+          sleep 10
+        done
+        exit 1
+      register: ssh_ready
+      changed_when: false
+      ignore_errors: yes
+
+    - name: "Restart edge-node service on VM1"
+      shell: |
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -i /home/lojain/.ssh/edge-key.pem \
+        -o ProxyJump=root@{{ controller_ip }} \
+        ubuntu@{{ vm1_floating_ip }} \
+        "sudo systemctl restart edge-node"
+      register: service_restart
+      changed_when: true
+      ignore_errors: yes
+
+    - name: "Verify edge-node service is running"
+      shell: |
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -i /home/lojain/.ssh/edge-key.pem \
+        -o ProxyJump=root@{{ controller_ip }} \
+        ubuntu@{{ vm1_floating_ip }} \
+        "systemctl is-active edge-node"
+      register: service_status
+      until: service_status.stdout == "active"
+      retries: 5
+      delay: 5
+
+    - name: "Log scale-in event"
+      lineinfile:
+        path: "{{ event_log }}"
+        line: "{{ ansible_date_time.iso8601 }},edge-node-3,standby,recovery,scale-in,success"
+        create: yes
+      ignore_errors: yes
+
+    - name: "Final report"
+      debug:
+        msg: "SCALE-IN COMPLETE. VM3 powered off. System back to 2-node operation."

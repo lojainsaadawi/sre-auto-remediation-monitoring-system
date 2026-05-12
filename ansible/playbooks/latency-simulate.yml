@@ -1,0 +1,88 @@
+---
+# =============================================================
+# latency-simulate.yml
+# Chaos Engineering — Inject artificial network latency
+# on an edge node VM using Linux tc (traffic control).
+# Purpose: Trigger the graduated alert chain for demos
+#          and graduation project presentations.
+#
+# Usage:
+#   ansible-playbook latency-simulate.yml \
+#     -e "target_host=edge-node-1 latency_ms=100 jitter_ms=20"
+#
+# Defaults: latency=100ms, jitter=20ms, target=edge-node-1
+# =============================================================
+
+- name: "Chaos Engineering — Inject Network Latency"
+  hosts: "{{ target_host | default('edge-node-1') }}"
+  become: yes
+  gather_facts: yes
+
+  vars:
+    latency_ms:  "{{ latency_ms  | default(100) }}"
+    jitter_ms: "20"
+    target_iface: "{{ ansible_default_ipv4.interface | default('eth0') }}"
+    event_log:   "/home/lojain/observability-stack/events/events.csv"
+    action:      "latency-simulate"
+
+  tasks:
+
+    - name: "1. Display chaos parameters"
+      debug:
+        msg: >
+          CHAOS ENGINEERING — Latency Injection
+          Target:    {{ inventory_hostname }} ({{ zone }})
+          Interface: {{ target_iface }}
+          Latency:   {{ latency_ms }}ms ± {{ jitter_ms }}ms
+          Effect:    Edge node MQTT processing latency will increase.
+                     Graduated alerts should fire within 1-2 minutes.
+
+    - name: "2. Check if tc is installed"
+      command: which tc
+      register: tc_check
+      changed_when: false
+      failed_when: false
+
+    - name: "3. Install iproute2 if needed"
+      apt:
+        name: iproute2
+        state: present
+        update_cache: yes
+      when: tc_check.rc != 0
+
+    - name: "4. Remove existing tc rules (clean slate)"
+      shell: "tc qdisc del dev {{ target_iface }} root 2>/dev/null || true"
+      changed_when: true
+
+    - name: "5. Apply netem latency on interface"
+      shell: >
+        tc qdisc add dev {{ target_iface }} root netem
+        delay {{ latency_ms }}ms {{ jitter_ms }}ms distribution normal
+      register: tc_apply
+      changed_when: true
+
+    - name: "6. Verify tc rule applied"
+      shell: "tc qdisc show dev {{ target_iface }}"
+      register: tc_show
+      changed_when: false
+
+    - name: "7. Display applied rule"
+      debug:
+        msg: "{{ tc_show.stdout_lines }}"
+
+    - name: "8. Log chaos event"
+      lineinfile:
+        path: "{{ event_log }}"
+        line: "{{ ansible_date_time.iso8601 }},{{ inventory_hostname }},{{ zone }},chaos,{{ action }},latency={{ latency_ms }}ms"
+        create: yes
+      delegate_to: localhost
+      become: no
+
+    - name: "9. Final report"
+      debug:
+        msg: >
+          Latency injection active on {{ inventory_hostname }}.
+          {{ latency_ms }}ms delay on {{ target_iface }}.
+          Watch Grafana — alerts should fire within 1-2 minutes.
+          To remove: ansible-playbook latency-remove.yml -e "target_host={{ inventory_hostname }}"
+...

@@ -1,0 +1,274 @@
+{
+  "name": "Workflow 1 — Alert Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alerts",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "node-01",
+      "name": "Alert Receiver",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const body = items[0].json.body ?? items[0].json;\nconst alerts = Array.isArray(body.alerts) ? body.alerts : [body];\nreturn alerts\n  .filter(a => a.status === 'firing')\n  .map(a => {\n    const zone = a.labels?.exported_zone ?? a.labels?.zone ?? 'unknown';\n    const zoneMap = { zone1: 'edge-node-1', zone2: 'edge-node-2' };\n    return {\n      json: {\n        alertname:   a.labels?.alertname ?? '',\n        severity:    a.labels?.severity  ?? '',\n        zone,\n        instance:    a.labels?.instance  ?? '',\n        target_host: zoneMap[zone] ?? 'edge_nodes',\n        description: a.annotations?.description ?? 'No description',\n        startsAt:    a.startsAt ?? new Date().toISOString()\n      }\n    };\n  });"
+      },
+      "id": "node-02",
+      "name": "Parse and Filter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "={{ $json.severity }}",
+                  "typeFilter": "string"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.severity }}",
+                    "rightValue": "warning",
+                    "operator": "equals"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputName": "0"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "={{ $json.severity }}",
+                  "typeFilter": "string"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.severity }}",
+                    "rightValue": "moderate",
+                    "operator": "equals"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputName": "1"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "={{ $json.severity }}",
+                  "typeFilter": "string"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.severity }}",
+                    "rightValue": "critical",
+                    "operator": "equals"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputName": "2"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "={{ $json.severity }}",
+                  "typeFilter": "string"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.severity }}",
+                    "rightValue": "emergency",
+                    "operator": "equals"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputName": "3"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "={{ $json.severity }}",
+                  "typeFilter": "string"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.severity }}",
+                    "rightValue": "VM Down",
+                    "operator": "equals"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputName": "4"
+            }
+          ]
+        }
+      },
+      "id": "node-03",
+      "name": "Route by Severity",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "6705672869",
+        "text": "=⚠️ WARNING ALERT\n━━━━━━━━━━━━━━━━\nZone: {{ $json.zone }}\nNode: {{ $json.instance }}\nDetail: {{ $json.description }}\nTime: {{ new Date($json.startsAt).toUTCString() }}\n\nLatency exceeded 60ms warning threshold.\nMonitoring only — no automated action.\n\nDashboard: http://localhost:3000/d/edge-overview",
+        "additionalFields": {}
+      },
+      "id": "node-05",
+      "name": "Notify Warning",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [920, 100]
+    },
+    {
+      "parameters": {
+        "chatId": "6705672869",
+        "text": "=🟠 MODERATE ALERT — Running edge-tune.yml\n━━━━━━━━━━━━━━━━\nZone: {{ $json.zone }}\nNode: {{ $json.target_host }}\nDetail: {{ $json.description }}\nTime: {{ new Date($json.startsAt).toUTCString() }}\n\nLatency exceeded 75ms moderate threshold.\nApplying local optimizations:\n- Renice edge-node process\n- Tune kernel network buffers\n- Drop page cache\n\nDashboard: http://localhost:3000/d/edge-overview",
+        "additionalFields": {}
+      },
+      "id": "node-06",
+      "name": "Notify Moderate",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [920, 260]
+    },
+    {
+      "parameters": {
+        "command": "=cd /home/lojain/observability-stack && ansible-playbook ansible/playbooks/edge-tune.yml -i ansible/inventory.ini -e \"target_host={{ $json.target_host }}\" 2>&1 | tail -5"
+      },
+      "id": "node-07",
+      "name": "Run edge-tune",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1160, 260]
+    },
+    {
+      "parameters": {
+        "chatId": "6705672869",
+        "text": "=🔴 CRITICAL ALERT — Running load-redistribute.yml\n━━━━━━━━━━━━━━━━\nZone: {{ $json.zone }}\nNode: {{ $json.target_host }}\nDetail: {{ $json.description }}\nTime: {{ new Date($json.startsAt).toUTCString() }}\n\nLatency exceeded 85ms critical threshold.\nThrottling sensors to 10s interval for zone {{ $json.zone }}.\n\nDashboard: http://localhost:3000/d/edge-overview",
+        "additionalFields": {}
+      },
+      "id": "node-08",
+      "name": "Notify Critical",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [920, 420]
+    },
+    {
+      "parameters": {
+        "command": "=cd /home/lojain/observability-stack && ansible-playbook ansible/playbooks/load-redistribute.yml -i ansible/inventory.ini -e \"target_zone={{ $json.zone }}\" 2>&1 | tail -5"
+      },
+      "id": "node-09",
+      "name": "Run load-redistribute",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1160, 420]
+    },
+    {
+      "parameters": {
+        "chatId": "6705672869",
+        "text": "=🚨 EMERGENCY — Scaling Out VM3 Automatically\n━━━━━━━━━━━━━━━━\nZone: {{ $json.zone }}\nNode: {{ $json.target_host }}\nDetail: {{ $json.description }}\nTime: {{ new Date($json.startsAt).toUTCString() }}\n\nLatency exceeded 95ms emergency threshold.\nRunning out-scale.yml:\n- Powering on VM3 (edge-node-3)\n- Associating floating IP 10.0.10.160\n- Deploying edge-node service\n- Redistributing zone load\n\nVM3 activation takes ~45 seconds...\nDashboard: http://localhost:3000/d/edge-overview",
+        "additionalFields": {}
+      },
+      "id": "node-10",
+      "name": "Emergency Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [920, 580]
+    },
+    {
+      "parameters": {
+        "command": "=cd /home/lojain/observability-stack && ansible-playbook ansible/playbooks/out-scale.yml -i ansible/inventory.ini -e \"target_zone={{ $json.zone }}\" 2>&1 | tail -10"
+      },
+      "id": "node-11",
+      "name": "Run out-scale",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1160, 580]
+    },
+    {
+      "parameters": {
+        "chatId": "6705672869",
+        "text": "=✅ SCALE-OUT COMPLETE — VM3 Active\n━━━━━━━━━━━━━━━━\nVM3: edge-node-3 | IP: 10.0.10.160\nZone assisted: {{ $('Emergency Alert').first().json.zone }}\nTime: {{ new Date().toUTCString() }}\n\nVM3 powered on and edge-node deployed.\nScale-in triggers automatically when latency drops below 60ms.\n\nDashboard: http://localhost:3000/d/edge-overview",
+        "additionalFields": {}
+      },
+      "id": "node-12",
+      "name": "Scale-Out Confirmation",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1400, 580]
+    },
+    {
+      "parameters": {
+        "chatId": "6705672869",
+        "text": "=🔴 VM DOWN — Node Unreachable\n━━━━━━━━━━━━━━━━\nZone: {{ $json.zone }}\nInstance: {{ $json.instance }}\nDetail: {{ $json.description }}\nTime: {{ new Date($json.startsAt).toUTCString() }}\n\nHeartbeat absent 30+ seconds.\nCheck: ssh root@192.168.122.55\nthen: openstack server list\n\nDashboard: http://localhost:3000/d/edge-overview",
+        "additionalFields": {}
+      },
+      "id": "node-13",
+      "name": "Notify VM Down",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [920, 740]
+    }
+  ],
+  "connections": {
+    "Alert Receiver": {
+      "main": [[{ "node": "Parse and Filter", "type": "main", "index": 0 }]]
+    },
+    "Parse and Filter": {
+      "main": [[{ "node": "Route by Severity", "type": "main", "index": 0 }]]
+    },
+    "Route by Severity": {
+      "main": [
+        [{ "node": "Notify Warning", "type": "main", "index": 0 }],
+        [{ "node": "Notify Moderate", "type": "main", "index": 0 }],
+        [{ "node": "Notify Critical", "type": "main", "index": 0 }],
+        [{ "node": "Emergency Alert", "type": "main", "index": 0 }],
+        [{ "node": "Notify VM Down", "type": "main", "index": 0 }]
+      ]
+    },
+    "Notify Moderate": {
+      "main": [[{ "node": "Run edge-tune", "type": "main", "index": 0 }]]
+    },
+    "Notify Critical": {
+      "main": [[{ "node": "Run load-redistribute", "type": "main", "index": 0 }]]
+    },
+    "Emergency Alert": {
+      "main": [[{ "node": "Run out-scale", "type": "main", "index": 0 }]]
+    },
+    "Run out-scale": {
+      "main": [[{ "node": "Scale-Out Confirmation", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "tags": []
+}

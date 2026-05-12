@@ -1,0 +1,17 @@
+# =============================================================
+# Grafana Dashboard Provisioning
+# Auto-loads all dashboards from the dashboards directory
+# =============================================================
+
+apiVersion: 1
+
+providers:
+  - name: 'Edge Monitoring Dashboards'
+    orgId: 1
+    folder: 'Edge Monitoring'
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards

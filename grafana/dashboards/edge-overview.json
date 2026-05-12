@@ -1,0 +1,646 @@
+{
+  "__inputs": [],
+  "__requires": [],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Real-time edge node monitoring — IoT sensors, latency, alerts, scale-out events",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+
+    {
+      "id": 1,
+      "type": "row",
+      "title": "System Health",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Edge Node 1 — Zone 1",
+      "description": "Heartbeat: 1=alive, 0=down",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "text": "DOWN",  "color": "red"   } }, "type": "value" },
+            { "options": { "1": { "text": "ALIVE", "color": "green" } }, "type": "value" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",   "value": 0 },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "edge_heartbeat{zone=\"zone1\"}",
+          "legendFormat": "zone1"
+        }
+      ]
+    },
+
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Edge Node 2 — Zone 2",
+      "description": "Heartbeat: 1=alive, 0=down",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "text": "DOWN",  "color": "red"   } }, "type": "value" },
+            { "options": { "1": { "text": "ALIVE", "color": "green" } }, "type": "value" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",   "value": 0 },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "edge_heartbeat{zone=\"zone2\"}",
+          "legendFormat": "zone2"
+        }
+      ]
+    },
+
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Edge Node 3 — Standby (VM3)",
+      "description": "VM3 powers on only during emergency scale-out",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "text": "STANDBY", "color": "blue"  } }, "type": "value" },
+            { "options": { "1": { "text": "ACTIVE",  "color": "orange"} }, "type": "value" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue",   "value": 0 },
+              { "color": "orange", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "edge_heartbeat{zone=\"standby\"} or vector(0)",
+          "legendFormat": "standby"
+        }
+      ]
+    },
+
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Total Active Sensors",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": 0  },
+              { "color": "yellow", "value": 12 },
+              { "color": "green",  "value": 24 }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(edge_active_sensors{job=\"edge_nodes\"})",
+          "legendFormat": "sensors"
+        }
+      ]
+    },
+
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Current SLA",
+      "description": "Target: 99.9%",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 3,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": 0    },
+              { "color": "yellow", "value": 99   },
+              { "color": "green",  "value": 99.9 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "avg(edge:sla:current)",
+          "legendFormat": "SLA"
+        }
+      ]
+    },
+
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Error Budget Remaining",
+      "description": "Positive = budget available. Negative = SLA breached.",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 4,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": -100 },
+              { "color": "yellow", "value": 0    },
+              { "color": "green",  "value": 0.05 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "avg(edge:error_budget:remaining)",
+          "legendFormat": "budget"
+        }
+      ]
+    },
+
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Processing Latency",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "collapsed": false
+    },
+
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Edge Node Processing Latency (ms)",
+      "description": "Alert thresholds: warning=60ms, moderate=75ms, critical=85ms, emergency=95ms",
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 6 },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "lineWidth": 2 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0  },
+              { "color": "yellow", "value": 60 },
+              { "color": "orange", "value": 75 },
+              { "color": "red",    "value": 85 },
+              { "color": "purple", "value": 95 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "edge_processing_latency_ms{job=\"edge_nodes\"}",
+          "legendFormat": "{{ zone }}"
+        }
+      ]
+    },
+
+    {
+      "id": 12,
+      "type": "gauge",
+      "title": "Zone 1 Latency",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 6 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0,
+          "max": 120,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0  },
+              { "color": "yellow", "value": 60 },
+              { "color": "orange", "value": 75 },
+              { "color": "red",    "value": 85 },
+              { "color": "purple", "value": 95 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "edge_processing_latency_ms{zone=\"zone1\"}",
+          "legendFormat": "zone1"
+        }
+      ]
+    },
+
+    {
+      "id": 13,
+      "type": "gauge",
+      "title": "Zone 2 Latency",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 6 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0,
+          "max": 120,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0  },
+              { "color": "yellow", "value": 60 },
+              { "color": "orange", "value": 75 },
+              { "color": "red",    "value": 85 },
+              { "color": "purple", "value": 95 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "edge_processing_latency_ms{zone=\"zone2\"}",
+          "legendFormat": "zone2"
+        }
+      ]
+    },
+
+    {
+      "id": 14,
+      "type": "gauge",
+      "title": "Zone 3 — No Listener",
+      "description": "Zone 3 sensors publish but nobody is listening until VM3 activates",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 10 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0,
+          "max": 120,
+          "mappings": [
+            { "options": { "null": { "text": "NO LISTENER" } }, "type": "special" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": 0 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "edge_processing_latency_ms{zone=\"standby\"}",
+          "legendFormat": "zone3"
+        }
+      ]
+    },
+
+    {
+      "id": 15,
+      "type": "gauge",
+      "title": "VM3 Standby Latency",
+      "description": "VM3 becomes active only during emergency scale-out",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 10 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0,
+          "max": 120,
+          "mappings": [
+            { "options": { "null": { "text": "POWERED OFF" } }, "type": "special" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue",   "value": 0  },
+              { "color": "green",  "value": 1  },
+              { "color": "yellow", "value": 60 },
+              { "color": "red",    "value": 85 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "edge_processing_latency_ms{zone=\"standby\"}",
+          "legendFormat": "VM3"
+        }
+      ]
+    },
+
+    {
+      "id": 20,
+      "type": "row",
+      "title": "MQTT Message Throughput",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "collapsed": false
+    },
+
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Messages Received Rate (msg/s)",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 15 },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "lineWidth": 2 }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "rate(edge_messages_received_total{job=\"edge_nodes\"}[1m])",
+          "legendFormat": "{{ zone }}"
+        }
+      ]
+    },
+
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Messages by Sensor Type",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 15 },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "lineWidth": 2 }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "rate(edge_messages_by_type_total{job=\"edge_nodes\"}[1m])",
+          "legendFormat": "{{ zone }} — {{ sensor_type }}"
+        }
+      ]
+    },
+
+    {
+      "id": 30,
+      "type": "row",
+      "title": "Infrastructure — OpenStack Nodes",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 },
+      "collapsed": false
+    },
+
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "OpenStack Node CPU Usage (%)",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 23 },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": { "lineWidth": 2 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0  },
+              { "color": "yellow","value": 70 },
+              { "color": "red",   "value": 90 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "100 - (avg by (instance) (irate(node_cpu_seconds_total{mode=\"idle\",job=\"openstack_nodes\"}[2m])) * 100)",
+          "legendFormat": "{{ instance }}"
+        }
+      ]
+    },
+
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "OpenStack Node Memory Usage (%)",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 23 },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": { "lineWidth": 2 }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "(1 - (node_memory_MemAvailable_bytes{job=\"openstack_nodes\"} / node_memory_MemTotal_bytes{job=\"openstack_nodes\"})) * 100",
+          "legendFormat": "{{ instance }}"
+        }
+      ]
+    },
+
+    {
+      "id": 40,
+      "type": "row",
+      "title": "SRE — Error Budget",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 30 },
+      "collapsed": false
+    },
+
+    {
+      "id": 41,
+      "type": "timeseries",
+      "title": "SLA Over Time (%)",
+      "description": "Target: 99.9% — Red line = SLA target",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 31 },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 99,
+          "max": 100,
+          "custom": { "lineWidth": 2 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",   "value": 0    },
+              { "color": "green", "value": 99.9 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "edge:sla:current",
+          "legendFormat": "{{ zone }} SLA"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "vector(99.9)",
+          "legendFormat": "Target (99.9%)"
+        }
+      ]
+    },
+
+    {
+      "id": 42,
+      "type": "timeseries",
+      "title": "Error Budget Burn Rate",
+      "description": "Alert fires when burn rate > 2x",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 31 },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0 },
+              { "color": "yellow", "value": 1 },
+              { "color": "red",    "value": 2 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "edge:burn_rate:1h",
+          "legendFormat": "{{ zone }} burn rate"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "vector(2)",
+          "legendFormat": "Alert threshold (2x)"
+        }
+      ]
+    }
+
+  ],
+  "refresh": "15s",
+  "schemaVersion": 38,
+  "tags": ["edge", "iot", "sre", "openstack"],
+  "templating": { "list": [] },
+  "time": { "from": "now-30m", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Edge Monitoring — Overview",
+  "uid": "edge-overview",
+  "version": 1
+}

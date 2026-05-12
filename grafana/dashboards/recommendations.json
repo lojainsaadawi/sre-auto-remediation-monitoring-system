@@ -1,0 +1,317 @@
+{
+  "__inputs": [],
+  "__requires": [],
+  "annotations": { "list": [] },
+  "description": "SRE event history, remediation log, scale-out events and recommendations",
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "title": "Edge Overview",
+      "url": "/d/edge-overview",
+      "type": "link",
+      "icon": "dashboard"
+    }
+  ],
+  "panels": [
+
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Alert Timeline",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Alert Severity Over Time",
+      "description": "Shows which severity levels fired and when",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 1 },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "lineWidth": 2 }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "warning threshold" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } },
+              { "id": "custom.lineStyle", "value": { "dash": [10, 10], "fill": "dash" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "moderate threshold" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } },
+              { "id": "custom.lineStyle", "value": { "dash": [10, 10], "fill": "dash" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "critical threshold" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } },
+              { "id": "custom.lineStyle", "value": { "dash": [10, 10], "fill": "dash" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "emergency threshold" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "purple", "mode": "fixed" } },
+              { "id": "custom.lineStyle", "value": { "dash": [5, 5], "fill": "dash" } }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "edge_processing_latency_ms{job=\"edge_nodes\"}",
+          "legendFormat": "{{ zone }} latency"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "vector(60)",
+          "legendFormat": "warning threshold"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "vector(75)",
+          "legendFormat": "moderate threshold"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "vector(85)",
+          "legendFormat": "critical threshold"
+        },
+        {
+          "datasource": "Prometheus",
+          "expr": "vector(95)",
+          "legendFormat": "emergency threshold"
+        }
+      ]
+    },
+
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Scale-Out Events",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+      "collapsed": false
+    },
+
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Times VM3 Was Activated",
+      "description": "Total scale-out events since monitoring started",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 10 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0 },
+              { "color": "yellow", "value": 3 },
+              { "color": "red",    "value": 5 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "count_over_time(edge_heartbeat{zone=\"standby\"}[24h] == 1)",
+          "legendFormat": "activations"
+        }
+      ]
+    },
+
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Total Emergency Alerts",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 10 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0 },
+              { "color": "yellow", "value": 1 },
+              { "color": "red",    "value": 3 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "count_over_time(ALERTS{severity=\"emergency\",alertstate=\"firing\"}[24h])",
+          "legendFormat": "emergencies"
+        }
+      ]
+    },
+
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Average Recovery Time (min)",
+      "description": "Average time from emergency alert to latency below warning",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 10 },
+      "options": {
+        "reduceOptions": { "calcs": ["mean"] },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "m",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0  },
+              { "color": "yellow", "value": 5  },
+              { "color": "red",    "value": 10 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "avg(edge_processing_latency_ms{job=\"edge_nodes\"}) / 60 * 0",
+          "legendFormat": "N/A"
+        }
+      ]
+    },
+
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Current System State",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 10 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "text": "NORMAL",    "color": "green"  } }, "type": "value" },
+            { "options": { "1": { "text": "SCALE-OUT", "color": "orange" } }, "type": "value" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": 0 },
+              { "color": "orange", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "edge_heartbeat{zone=\"standby\"} or vector(0)",
+          "legendFormat": "state"
+        }
+      ]
+    },
+
+    {
+      "id": 20,
+      "type": "row",
+      "title": "VM3 Standby — Unheard Zone 3 Sensors",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "collapsed": false
+    },
+
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Zone 3 Sensor Message Rate — Publishing But No Listener",
+      "description": "Zone 3 sensors are always publishing. This graph goes flat (zero) because nobody is listening — until VM3 activates.",
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 15 },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "lineWidth": 2 },
+          "color": { "fixedColor": "blue", "mode": "fixed" }
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "rate(edge_messages_received_total{zone=\"standby\"}[1m])",
+          "legendFormat": "zone3 messages received by VM3"
+        }
+      ]
+    },
+
+    {
+      "id": 30,
+      "type": "row",
+      "title": "Remediation Recommendations",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 },
+      "collapsed": false
+    },
+
+    {
+      "id": 31,
+      "type": "text",
+      "title": "Graduated Response Reference",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 23 },
+      "options": {
+        "mode": "markdown",
+        "content": "## Graduated Alert Response\n\n| Threshold | Severity | Automated Action |\n|-----------|----------|------------------|\n| **60%** | ⚠️ Warning | Notification only — log event |\n| **75%** | 🟠 Moderate | Run `edge-tune.yml` — local optimizations |\n| **85%** | 🔴 Critical | Run `load-redistribute.yml` — reduce sensor rate |\n| **95%** | 🟣 Emergency | Human Override — Telegram 60s countdown |\n\n## Scale-Out Logic\n- VM3 powers on when emergency fires\n- VM3 handles the most overloaded zone\n- Both VM1+VM2 overloaded → VM3 helps most critical, Telegram sent for second\n- After recovery: VM3 powers off automatically via `scale-in.yml`\n\n## Error Budget\n- SLA Target: **99.9%**\n- Monthly budget: **43.8 minutes** of downtime allowed\n- Burn rate alert: fires when consuming > **2x** budget per hour"
+      }
+    },
+
+    {
+      "id": 32,
+      "type": "text",
+      "title": "Demo Commands",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 23 },
+      "options": {
+        "mode": "markdown",
+        "content": "## Chaos Engineering Demo\n\n```bash\n# Trigger warning (60ms latency)\nansible-playbook latency-simulate.yml \\\n  -e \"target_host=edge-node-1 latency_ms=80\"\n\n# Trigger critical (85ms latency)\nansible-playbook latency-simulate.yml \\\n  -e \"target_host=edge-node-1 latency_ms=120\"\n\n# Trigger emergency (95ms latency)\nansible-playbook latency-simulate.yml \\\n  -e \"target_host=edge-node-1 latency_ms=200\"\n\n# Or use stress mode on sensors\n./virtual-sensors/sensors-generate.sh stress zone1\n```\n\n## Recovery\n```bash\n# Remove injected latency\nansible-playbook latency-remove.yml \\\n  -e \"target_host=edge-node-1\"\n\n# Restore normal sensor rate\n./virtual-sensors/sensors-generate.sh normal zone1\n```"
+      }
+    }
+
+  ],
+  "refresh": "15s",
+  "schemaVersion": 38,
+  "tags": ["edge", "sre", "events"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "SRE — Recommendations & Events",
+  "uid": "sre-recommendations",
+  "version": 1
+}

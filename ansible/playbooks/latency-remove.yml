@@ -1,0 +1,56 @@
+---
+# =============================================================
+# latency-remove.yml
+# Removes artificial network latency injected by
+# latency-simulate.yml. Run after demo to restore
+# normal operation and allow scale-in to trigger.
+# =============================================================
+
+- name: "Remove Injected Network Latency"
+  hosts: "{{ target_host | default('edge_nodes') }}"
+  become: yes
+  gather_facts: yes
+
+  vars:
+    target_iface: "{{ ansible_default_ipv4.interface | default('eth0') }}"
+    event_log:    "/home/lojain/observability-stack/events/events.csv"
+    action:       "latency-remove"
+
+  tasks:
+
+    - name: "1. Display target"
+      debug:
+        msg: >
+          Removing network latency on {{ inventory_hostname }} ({{ zone }})
+          Interface: {{ target_iface }}
+
+    - name: "2. Remove all tc rules"
+      shell: "tc qdisc del dev {{ target_iface }} root 2>/dev/null && echo 'Removed' || echo 'No rules to remove'"
+      register: tc_remove
+      changed_when: "'Removed' in tc_remove.stdout"
+
+    - name: "3. Verify clean state"
+      shell: "tc qdisc show dev {{ target_iface }}"
+      register: tc_verify
+      changed_when: false
+
+    - name: "4. Display current tc state"
+      debug:
+        msg: "{{ tc_verify.stdout_lines }}"
+
+    - name: "5. Log removal event"
+      lineinfile:
+        path: "{{ event_log }}"
+        line: "{{ ansible_date_time.iso8601 }},{{ inventory_hostname }},{{ zone }},chaos,{{ action }},success"
+        create: yes
+      delegate_to: localhost
+      become: no
+
+    - name: "6. Final report"
+      debug:
+        msg: >
+          Latency removed from {{ inventory_hostname }}.
+          Network is back to normal.
+          Alerts should resolve within {{ 3 | int * 60 }}s (cooldown period).
+          If VM3 was powered on, scale-in will trigger automatically.
+...

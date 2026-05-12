@@ -1,0 +1,55 @@
+---
+# =============================================================
+# edge-tune.yml — Moderate alert response (75% threshold)
+# =============================================================
+
+- name: Edge Node Local Optimization
+  hosts: "{{ target_host | default('edge_nodes') }}"
+  become: yes
+  gather_facts: yes
+
+  vars:
+    event_log: "/home/lojain/observability-stack/events/events.csv"
+
+  tasks:
+
+    - name: "Set edge-node process to higher priority"
+      shell: |
+        pid=$(pgrep -f "edge-node.py" | head -1)
+        if [ -n "$pid" ]; then
+          renice -n -5 -p "$pid" 2>/dev/null || true
+          echo "Reniced PID $pid"
+        else
+          echo "Process not found"
+        fi
+      changed_when: true
+
+    - name: "Increase network buffers"
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: yes
+      loop:
+        - { name: net.core.rmem_max, value: '16777216' }
+        - { name: net.core.wmem_max, value: '16777216' }
+        - { name: vm.swappiness,     value: '10' }
+      ignore_errors: yes
+
+    - name: "Drop page cache"
+      shell: "echo 1 > /proc/sys/vm/drop_caches"
+      changed_when: true
+      ignore_errors: yes
+
+    - name: "Log event"
+      lineinfile:
+        path: "{{ event_log }}"
+        line: "{{ ansible_date_time.iso8601 }},{{ inventory_hostname }},{{ zone | default('unknown') }},moderate,edge-tune,success"
+        create: yes
+      delegate_to: localhost
+      become: no
+      ignore_errors: yes
+
+    - name: "Report"
+      debug:
+        msg: "edge-tune completed on {{ inventory_hostname }}."

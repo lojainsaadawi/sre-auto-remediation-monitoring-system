@@ -1,0 +1,100 @@
+---
+# =============================================================
+# deploy-node-exporter.yml
+# Installs Node Exporter on all edge node VMs.
+# Must run before deploy-edge.yml so Prometheus can
+# scrape both system metrics and edge textfile metrics.
+# =============================================================
+
+- name: Deploy Node Exporter on all edge VMs
+  hosts: all_vms
+  become: yes
+  gather_facts: yes
+
+  vars:
+    node_exporter_version: "1.6.1"
+    node_exporter_port: 9100
+    textfile_dir: /var/lib/node_exporter
+
+  tasks:
+
+    - name: "1. Configure apt proxy"
+      copy:
+        dest: /etc/apt/apt.conf.d/95proxy
+        content: |
+          Acquire::http::Proxy "{{ proxy_http }}";
+          Acquire::https::Proxy "{{ proxy_http }}";
+        mode: '0644'
+
+    - name: "2. Check if Node Exporter already installed"
+      stat:
+        path: /usr/local/bin/node_exporter
+      register: node_exporter_bin
+
+    - name: "3. Download Node Exporter"
+      unarchive:
+        src: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+        dest: /tmp
+        remote_src: yes
+        creates: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+      environment:
+        http_proxy:  "{{ proxy_http }}"
+        https_proxy: "{{ proxy_http }}"
+      when: not node_exporter_bin.stat.exists
+
+    - name: "4. Install Node Exporter binary"
+      copy:
+        src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+        dest: /usr/local/bin/node_exporter
+        mode: '0755'
+        remote_src: yes
+      when: not node_exporter_bin.stat.exists
+
+    - name: "5. Create textfile collector directory"
+      file:
+        path: "{{ textfile_dir }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+
+    - name: "6. Create Node Exporter systemd service"
+      copy:
+        dest: /etc/systemd/system/node_exporter.service
+        content: |
+          [Unit]
+          Description=Node Exporter
+          After=network.target
+
+          [Service]
+          User=root
+          ExecStart=/usr/local/bin/node_exporter \
+            --collector.textfile.directory={{ textfile_dir }} \
+            --web.listen-address=:{{ node_exporter_port }}
+          Restart=on-failure
+          RestartSec=5s
+
+          [Install]
+          WantedBy=multi-user.target
+        mode: '0644'
+
+    - name: "7. Start and enable Node Exporter"
+      systemd:
+        name: node_exporter
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    - name: "8. Verify Node Exporter is running"
+      uri:
+        url: "http://localhost:{{ node_exporter_port }}/metrics"
+        method: GET
+        status_code: 200
+        timeout: 10
+      register: exporter_check
+      retries: 3
+      delay: 5
+
+    - name: "9. Report status"
+      debug:
+        msg: "Node Exporter running on {{ inventory_hostname }}:{{ node_exporter_port }} — textfile dir: {{ textfile_dir }}"

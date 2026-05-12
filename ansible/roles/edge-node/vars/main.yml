@@ -1,0 +1,23 @@
+---
+# =============================================================
+# Edge Node Role Variables
+# =============================================================
+
+# MQTT Configuration
+mqtt_broker: "10.0.10.11"
+mqtt_port:   1883
+
+# Metrics
+metrics_dir:    /var/lib/node_exporter
+write_interval: 5
+
+# Python dependencies
+pip_packages:
+  - paho-mqtt==1.6.1
+
+# Proxy for pip installs (via Squid on controller)
+pip_proxy: "http://10.0.10.11:3128"
+
+# Paths
+edge_node_script:  /usr/local/bin/edge-node.py
+edge_node_service: /etc/systemd/system/edge-node.service

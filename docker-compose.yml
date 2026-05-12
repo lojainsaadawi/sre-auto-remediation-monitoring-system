@@ -1,0 +1,163 @@
+# =============================================================
+# Observability Stack — Docker Compose
+# Services: Prometheus, Grafana, Alertmanager, n8n, Mosquitto
+# Run: docker compose up -d
+# =============================================================
+
+networks:
+  observability:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  alertmanager_data:
+  n8n_data:
+  mosquitto_data:
+  mosquitto_log:
+
+services:
+
+  # -----------------------------------------------------------
+  # Mosquitto — MQTT Broker
+  # IoT sensors publish here, edge nodes subscribe from here
+  # -----------------------------------------------------------
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    networks:
+      observability:
+        ipv4_address: 172.20.0.10
+
+  # -----------------------------------------------------------
+  # Prometheus — Metrics Collection and Alerting Engine
+  # -----------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ./prometheus/targets.json:/etc/prometheus/targets.json
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+      - "--web.enable-admin-api"
+    networks:
+      observability:
+        ipv4_address: 172.20.0.20
+    depends_on:
+      - mosquitto
+
+  # -----------------------------------------------------------
+  # Alertmanager — Routes Alerts to n8n Webhook
+  # -----------------------------------------------------------
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: alertmanager
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+      - "--log.level=info"
+    networks:
+      observability:
+        ipv4_address: 172.20.0.30
+    depends_on:
+      - prometheus
+
+  # -----------------------------------------------------------
+  # Grafana — Visualization Dashboards
+  # -----------------------------------------------------------
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/edge-overview.json
+      - GF_INSTALL_PLUGINS=
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    networks:
+      observability:
+        ipv4_address: 172.20.0.40
+    depends_on:
+      - prometheus
+
+  # -----------------------------------------------------------
+  # n8n — Intelligent Automation Workflow Engine
+  # Receives alerts from Alertmanager and executes responses
+  # -----------------------------------------------------------
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    dns_search: .
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://172.20.0.50:5678
+      - N8N_LOG_LEVEL=info
+      - N8N_LOG_OUTPUT=console,file
+      - N8N_LOG_FILE_LOCATION=/home/node/.n8n/logs/n8n.log
+      - DB_TYPE=sqlite
+      - DB_SQLITE_DATABASE=/home/node/.n8n/database.sqlite
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_HIRING_BANNER_ENABLED=false
+      - N8N_USER_MANAGEMENT_DISABLED=true
+      - N8N_AUTH_METHOD=none
+      # Ansible execution — n8n runs playbooks directly
+      - ANSIBLE_INVENTORY=/home/node/ansible/inventory.ini
+      - ANSIBLE_PRIVATE_KEY=/home/node/.ssh/edge-key.pem
+      # Telegram Bot
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - N8N_API_KEY=${N8N_API_KEY}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./ansible:/home/node/ansible:ro
+      - ./events:/home/node/events
+      - ~/.ssh/edge-key.pem:/home/node/.ssh/edge-key.pem:ro
+      - /usr/bin/ansible-playbook:/usr/bin/ansible-playbook:ro
+    networks:
+      observability:
+        ipv4_address: 172.20.0.50
+    depends_on:
+      - alertmanager

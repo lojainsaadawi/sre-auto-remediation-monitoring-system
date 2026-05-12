@@ -1,0 +1,68 @@
+---
+# =============================================================
+# load-redistribute.yml — Critical alert response (85% threshold)
+# =============================================================
+
+- name: Load Redistribution
+  hosts: localhost
+  gather_facts: yes
+
+  vars:
+    prometheus_url: "http://172.20.0.20:9090"
+    event_log:      "/home/lojain/observability-stack/events/events.csv"
+    overloaded_zone: "{{ target_zone | default('zone1') }}"
+
+  tasks:
+
+    - name: "Display redistribution target"
+      debug:
+        msg: "Load redistribution triggered for zone: {{ overloaded_zone }}"
+
+    - name: "Query Prometheus for current latency"
+      uri:
+        url: "{{ prometheus_url }}/api/v1/query?query=edge_processing_latency_last_ms%7Bjob%3D%22edge_nodes%22%7D"
+        method: GET
+        return_content: yes
+      register: prometheus_response
+      ignore_errors: yes
+
+    - name: "Slow down first 6 sensors in overloaded zone"
+      shell: |
+        for type in temperature humidity light pressure; do
+          for i in 01 02 03; do
+            container="sensor-${type}-{{ overloaded_zone }}-${i}"
+            if docker ps -q -f name="^${container}$" | grep -q .; then
+              docker rm -f "$container" > /dev/null 2>&1
+              docker run -d \
+                --name "$container" \
+                --restart unless-stopped \
+                --network host \
+                -e SENSOR_ID="${type}-{{ overloaded_zone }}-${i}" \
+                -e ZONE="{{ overloaded_zone }}" \
+                -e TYPE="$type" \
+                -e INTERVAL="10" \
+                -e BROKER_IP="172.20.0.10" \
+                -e BROKER_PORT="1883" \
+                virtual-sensor:latest > /dev/null 2>&1
+              echo "Throttled: $container to 10s interval"
+            fi
+          done
+        done
+      register: redistribute_result
+      changed_when: true
+      ignore_errors: yes
+
+    - name: "Show throttled sensors"
+      debug:
+        msg: "{{ redistribute_result.stdout_lines | default([]) }}"
+
+    - name: "Log event"
+      lineinfile:
+        path: "{{ event_log }}"
+        line: "{{ ansible_date_time.iso8601 }},localhost,{{ overloaded_zone }},critical,load-redistribute,success"
+        create: yes
+      ignore_errors: yes
+
+    - name: "Report"
+      debug:
+        msg: "load-redistribute completed for {{ overloaded_zone }}. Sensors throttled to 10s interval."

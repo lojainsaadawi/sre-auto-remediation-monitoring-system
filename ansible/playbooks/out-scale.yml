@@ -1,0 +1,187 @@
+---
+- name: "Scale-Out — Power On VM3"
+  hosts: localhost
+  gather_facts: yes
+
+  vars:
+    openrc_file:     "/root/bin/edge-monitoring-openrc.sh"
+    vm3_name:        "edge-node-3"
+    vm3_floating_ip: "10.0.10.160"
+    controller_ip:   "192.168.122.55"
+    event_log:       "/home/lojain/observability-stack/events/events.csv"
+    overloaded_zone: "{{ target_zone | default('zone1') }}"
+
+  tasks:
+    - name: "Power on VM3"
+      shell: |
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          root@{{ controller_ip }} \
+          "source {{ openrc_file }} && openstack server start {{ vm3_name }}"
+      changed_when: true
+      ignore_errors: yes
+
+    - name: "Associate VM3 floating IP"
+      shell: |
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          root@{{ controller_ip }} \
+          "source {{ openrc_file }} && \
+           EXISTING=\$(openstack server show {{ vm3_name }} -f json | \
+             python3 -c \"import sys,json; d=json.load(sys.stdin); \
+             addrs=d.get('addresses',{}); \
+             ips=[ip.strip() for nets in addrs.values() for ip in nets.split(',')]; \
+             print(next((ip for ip in ips if ip.startswith('10.0.10.')),'' ))\" 2>/dev/null || echo ''); \
+           if [ -n \"\$EXISTING\" ]; then \
+             echo \"Already has: \$EXISTING\"; \
+           else \
+             openstack server add floating ip {{ vm3_name }} {{ vm3_floating_ip }} && \
+             echo \"Associated: {{ vm3_floating_ip }}\"; \
+           fi"
+      register: fip_result
+      changed_when: true
+      ignore_errors: yes
+
+    - name: "Wait for VM3 to reach ACTIVE state"
+      shell: |
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          root@{{ controller_ip }} \
+          "source {{ openrc_file }} && \
+           for i in \$(seq 1 24); do \
+             STATUS=\$(openstack server show {{ vm3_name }} -f value -c status 2>/dev/null); \
+             echo \"Attempt \$i: \$STATUS\"; \
+             [ \"\$STATUS\" = 'ACTIVE' ] && exit 0; \
+             sleep 5; \
+           done; exit 1"
+      register: vm3_status
+      changed_when: false
+      ignore_errors: yes
+
+    - name: "Wait for SSH port 22 on VM3"
+      shell: |
+        for i in $(seq 1 24); do
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=5 \
+            -i /home/lojain/.ssh/edge-key.pem \
+            -o ProxyJump=root@{{ controller_ip }} \
+            ubuntu@{{ vm3_floating_ip }} "echo OK" 2>/dev/null && exit 0
+          echo "Attempt $i: SSH not ready yet..."
+          sleep 10
+        done
+        exit 1
+      register: ssh_ready
+      changed_when: false
+      ignore_errors: yes
+
+    - name: "Deploy systemd service using Template"
+      template:
+        src: ../roles/edge-node/templates/edge-node.service.j2
+        dest: /etc/systemd/system/edge-node.service
+        owner: root
+        group: root
+        mode: '0644'
+      become: yes
+      become_user: root
+      delegate_to: edge-node-3
+      vars:
+        zone: "{{ overloaded_zone }}"
+      notify: restart edge-node
+
+  handlers:
+    - name: restart edge-node
+      systemd:
+        name: edge-node
+        state: restarted
+        daemon_reload: yes
+      delegate_to: edge-node-3
+
+    - name: "Reload systemd daemon"
+      command: systemctl daemon-reload
+      delegate_to: edge-node-3
+      become: yes
+      register: reload_result
+      until: reload_result is succeeded
+      retries: 3
+      delay: 5
+
+    - name: "Restart edge-node service"
+      systemd:
+        name: edge-node
+        state: restarted
+      delegate_to: edge-node-3
+      become: yes
+      register: restart_result
+      until: restart_result is succeeded
+      retries: 3
+      delay: 5
+
+    - name: "Start edge-node service on VM3"
+      shell: |
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          -i /home/lojain/.ssh/edge-key.pem \
+          -o ProxyJump=root@{{ controller_ip }} \
+          ubuntu@{{ vm3_floating_ip }} \
+          "sudo systemctl start edge-node"
+      changed_when: true
+      ignore_errors: yes
+
+
+    - name: "Fallback deploy if SSH was slow"
+      shell: |
+        sleep 30
+        ansible-playbook \
+          /home/lojain/observability-stack/ansible/playbooks/deploy-edge.yml \
+          -i /home/lojain/observability-stack/ansible/inventory.ini \
+          -l edge-node-3 \
+          -e "zone={{ overloaded_zone }}" \
+          2>&1 | tail -10
+      register: fallback_deploy
+      changed_when: true
+      ignore_errors: yes
+      when: ssh_ready.rc != 0
+
+    - name: "Restore throttled sensors to normal 10s interval"
+      shell: |
+        for type in temperature humidity light pressure; do
+          for i in 01 02 03; do
+            container="sensor-${type}-{{ overloaded_zone }}-${i}"
+            if docker ps -q -f name="^${container}$" | grep -q .; then
+              docker rm -f "$container" > /dev/null 2>&1
+              docker run -d \
+                --name "$container" \
+                --restart unless-stopped \
+                --network host \
+                -e SENSOR_ID="${type}-{{ overloaded_zone }}-${i}" \
+                -e ZONE="{{ overloaded_zone }}" \
+                -e TYPE="$type" \
+                -e INTERVAL="10" \
+                -e BROKER_IP="172.20.0.10" \
+                -e BROKER_PORT="1883" \
+                virtual-sensor:latest > /dev/null 2>&1
+            fi
+          done
+        done
+        echo "Sensors restored"
+      changed_when: true
+      ignore_errors: yes
+
+    - name: "Verify edge-node running on VM3"
+      shell: |
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          -i /home/lojain/.ssh/edge-key.pem \
+          -o ProxyJump=root@{{ controller_ip }} \
+          ubuntu@{{ vm3_floating_ip }} \
+          "systemctl is-active edge-node" 2>/dev/null || echo "not-active"
+      register: vm3_service
+      changed_when: false
+      ignore_errors: yes
+
+    - name: "Log event"
+      lineinfile:
+        path: "{{ event_log }}"
+        line: "{{ ansible_date_time.iso8601 }},edge-node-3,{{ overloaded_zone }},emergency,out-scale,{{ vm3_service.stdout | default('unknown') }}"
+        create: yes
+      ignore_errors: yes
+
+    - name: "Final report"
+      debug:
+        msg: "SCALE-OUT COMPLETE. VM3={{ vm3_name }}, Zone={{ overloaded_zone }}, edge-node service={{ vm3_service.stdout | default('unknown') }}"
+...

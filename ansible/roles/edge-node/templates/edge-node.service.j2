@@ -1,0 +1,37 @@
+[Unit]
+Description=Edge Node MQTT Processor — {{ zone }}
+Documentation=https://github.com/lojain/observability-stack
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/usr/local/bin
+
+# Zone assignment — determines which MQTT topics to subscribe to
+Environment="ZONE={{ zone }}"
+Environment="BROKER_IP={{ mqtt_broker }}"
+Environment="BROKER_PORT={{ mqtt_port | default('1883') }}"
+Environment="METRICS_DIR=/var/lib/node_exporter"
+Environment="WRITE_INTERVAL=5"
+
+ExecStart=/usr/bin/python3 /usr/local/bin/edge-node.py
+
+# Restart policy
+Restart=on-failure
+RestartSec=10s
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=edge-node-{{ zone }}
+
+# Graceful shutdown timeout
+TimeoutStopSec=15s
+
+[Install]
+WantedBy=multi-user.target

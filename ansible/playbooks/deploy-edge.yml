@@ -1,0 +1,35 @@
+---
+# =============================================================
+# deploy-edge.yml
+# Deploys the edge-node.py script as a systemd service
+# on all active edge node VMs (zone1 and zone2).
+# Each VM gets the correct zone from its inventory variable.
+# =============================================================
+
+- name: Deploy Edge Node on all active VMs
+  hosts: all_vms
+  become: yes
+  gather_facts: yes
+
+  roles:
+    - role: ../roles/edge-node
+
+  post_tasks:
+
+    - name: "Verify metrics are flowing to Prometheus textfile"
+      shell: "cat /var/lib/node_exporter/edge_metrics.prom"
+      register: metrics_output
+      changed_when: false
+
+    - name: "Show current metrics"
+      debug:
+        msg: "{{ metrics_output.stdout_lines }}"
+
+    - name: "Final status"
+      debug:
+        msg: >
+          Edge node deployed successfully on {{ inventory_hostname }}.
+          Zone: {{ zone }}
+          Service: active
+          Metrics file: /var/lib/node_exporter/edge_metrics.prom
+...

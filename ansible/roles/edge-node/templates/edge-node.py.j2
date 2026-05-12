@@ -1,0 +1,295 @@
+{% raw %}
+#!/usr/bin/env python3
+# =============================================================
+# edge-node.py
+# Edge Node processing script - runs as systemd service on
+# each OpenStack VM. Subscribes to MQTT sensor topics and
+# exports metrics to Prometheus via Node Exporter textfile.
+#
+# Environment variables (set in systemd service):
+#   ZONE        : zone1 | zone2 (assigned zone for this node)
+#   BROKER_IP   : MQTT broker IP
+#   BROKER_PORT : MQTT broker port (default: 1883)
+#   METRICS_DIR : textfile collector dir (default: /var/lib/node_exporter)
+#   WRITE_INTERVAL : seconds between metric writes (default: 5)
+# =============================================================
+
+import socket
+import os
+import json
+import time
+import math
+import signal
+import logging
+import threading
+from datetime import datetime, timezone
+from collections import defaultdict
+
+import paho.mqtt.client as mqtt
+
+# -------------------------------------------------------------
+# Logging
+# -------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+log = logging.getLogger(__name__)
+
+# -------------------------------------------------------------
+# Configuration from environment variables
+# -------------------------------------------------------------
+ZONE           = os.environ.get('ZONE', 'zone1')
+BROKER_IP      = os.environ.get('BROKER_IP',      '10.0.10.11')
+BROKER_PORT    = int(os.environ.get('BROKER_PORT', '1883'))
+METRICS_DIR    = os.environ.get('METRICS_DIR',    '/var/lib/node_exporter')
+METRICS_FILE   = os.path.join(METRICS_DIR, 'edge_metrics.prom')
+WRITE_INTERVAL = float(os.environ.get('WRITE_INTERVAL', '5'))
+
+# MQTT topic subscription
+TOPIC = f"sensors/{ZONE}/#"
+
+# -------------------------------------------------------------
+# Metrics state (thread-safe)
+# -------------------------------------------------------------
+lock = threading.Lock()
+
+metrics = {
+    # Total messages received since start
+    'messages_received_total': 0,
+
+    # Per-sensor-type message counts
+    'messages_by_type': defaultdict(int),
+
+    # Processing latency tracking
+    'latency_sum_ms':   0.0,
+    'latency_count':    0,
+    'latency_last_ms':  0.0,
+    'latency_max_ms':   0.0,
+
+    # Heartbeat (1 = alive, 0 = shutting down)
+    'heartbeat': 1,
+
+    # Active sensor count (unique sensor IDs seen)
+    'active_sensors': set(),
+
+    # Last message timestamp
+    'last_message_time': 0.0,
+}
+
+# -------------------------------------------------------------
+# Global state
+# -------------------------------------------------------------
+running = True
+client  = None
+
+# -------------------------------------------------------------
+# Signal handler for graceful shutdown
+# -------------------------------------------------------------
+def handle_shutdown(signum, frame):
+    global running
+    log.info("Shutdown signal received. Setting heartbeat to 0...")
+    with lock:
+        metrics['heartbeat'] = 0
+    write_metrics()
+    running = False
+
+signal.signal(signal.SIGTERM, handle_shutdown)
+signal.signal(signal.SIGINT,  handle_shutdown)
+
+# -------------------------------------------------------------
+# MQTT message handler
+# -------------------------------------------------------------
+def on_message(client, userdata, msg):
+    receive_time = time.time()
+
+    try:
+        payload = json.loads(msg.payload.decode('utf-8'))
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        log.warning(f"Could not parse message on {msg.topic}: {e}")
+        return
+
+    sensor_id   = payload.get('sensor_id', 'unknown')
+    sensor_type = payload.get('type',      'unknown')
+    timestamp   = payload.get('timestamp', None)
+
+    # Calculate processing latency
+    latency_ms = 0.0
+    if timestamp:
+        try:
+            sent_time  = datetime.fromisoformat(timestamp).timestamp()
+            latency_ms = max(0.0, (receive_time - sent_time) * 1000)
+        except (ValueError, OSError):
+            latency_ms = 0.0
+
+    with lock:
+        metrics['messages_received_total'] += 1
+        metrics['messages_by_type'][sensor_type] += 1
+        metrics['active_sensors'].add(sensor_id)
+        metrics['last_message_time'] = receive_time
+
+        # Update latency stats
+        if latency_ms > 0:
+            metrics['latency_sum_ms']  += latency_ms
+            metrics['latency_count']   += 1
+            metrics['latency_last_ms']  = latency_ms
+            if latency_ms > metrics['latency_max_ms']:
+                metrics['latency_max_ms'] = latency_ms
+
+    log.debug(f"[{ZONE}] {sensor_id} ({sensor_type}): "
+              f"value={payload.get('value')} latency={latency_ms:.6f}ms")
+
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
+        log.info(f"Connected to MQTT broker {BROKER_IP}:{BROKER_PORT}")
+        client.subscribe(f"$share/edge_group/{TOPIC}", qos=1)
+        log.info(f"Subscribed to: {TOPIC}")
+    else:
+        log.error(f"Failed to connect to broker. rc={rc}")
+
+def on_disconnect(client, userdata, rc):
+    if rc != 0:
+        log.warning(f"Unexpected disconnection (rc={rc}). Reconnecting...")
+
+def on_subscribe(client, userdata, mid, granted_qos):
+    log.info(f"Subscription confirmed. QoS: {granted_qos}")
+
+# -------------------------------------------------------------
+# Write metrics to textfile for Node Exporter
+# -------------------------------------------------------------
+def write_metrics():
+    with lock:
+        m = dict(metrics)
+        active_count  = len(m['active_sensors'])
+        avg_latency   = (
+            m['latency_sum_ms'] / m['latency_count']
+            if m['latency_count'] > 0 else 0.0
+        )
+        by_type = dict(m['messages_by_type'])
+
+    lines = []
+
+    # --- Heartbeat ---
+    lines.append('# HELP edge_heartbeat Edge node alive status (1=alive, 0=down)')
+    lines.append('# TYPE edge_heartbeat gauge')
+    lines.append(f'edge_heartbeat{{zone="{ZONE}"}} {m["heartbeat"]}')
+
+    # --- Messages received total ---
+    lines.append('# HELP edge_messages_received_total Total MQTT messages received')
+    lines.append('# TYPE edge_messages_received_total counter')
+    lines.append(f'edge_messages_received_total{{zone="{ZONE}"}} {m["messages_received_total"]}')
+
+    # --- Messages by sensor type ---
+    lines.append('# HELP edge_messages_by_type_total Messages received per sensor type')
+    lines.append('# TYPE edge_messages_by_type_total counter')
+    for stype, count in by_type.items():
+        lines.append(f'edge_messages_by_type_total{{zone="{ZONE}",sensor_type="{stype}"}} {count}')
+
+    # --- Processing latency ---
+    lines.append('# HELP edge_processing_latency_ms Average message processing latency in ms')
+    lines.append('# TYPE edge_processing_latency_ms gauge')
+    lines.append(f'edge_processing_latency_ms{{zone="{ZONE}"}} {avg_latency:.3f}')
+
+    lines.append('# HELP edge_processing_latency_last_ms Last message processing latency in ms')
+    lines.append('# TYPE edge_processing_latency_last_ms gauge')
+    lines.append(f'edge_processing_latency_last_ms{{zone="{ZONE}"}} {m["latency_last_ms"]:.3f}')
+
+    lines.append('# HELP edge_processing_latency_max_ms Maximum processing latency seen in ms')
+    lines.append('# TYPE edge_processing_latency_max_ms gauge')
+    lines.append(f'edge_processing_latency_max_ms{{zone="{ZONE}"}} {m["latency_max_ms"]:.3f}')
+
+    # --- Active sensors ---
+    lines.append('# HELP edge_active_sensors Number of unique sensors seen')
+    lines.append('# TYPE edge_active_sensors gauge')
+    lines.append(f'edge_active_sensors{{zone="{ZONE}"}} {active_count}')
+
+    # --- Last message age ---
+    last_age = 0.0
+    if m['last_message_time'] > 0:
+        last_age = time.time() - m['last_message_time']
+    lines.append('# HELP edge_last_message_age_seconds Seconds since last message received')
+    lines.append('# TYPE edge_last_message_age_seconds gauge')
+    lines.append(f'edge_last_message_age_seconds{{zone="{ZONE}"}} {last_age:.1f}')
+
+    # Write atomically using a temp file
+    tmp_file = METRICS_FILE + '.tmp'
+    try:
+        os.makedirs(METRICS_DIR, exist_ok=True)
+        with open(tmp_file, 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+        os.replace(tmp_file, METRICS_FILE)
+    except OSError as e:
+        log.error(f"Failed to write metrics file: {e}")
+
+# -------------------------------------------------------------
+# Metrics writer thread
+# -------------------------------------------------------------
+def metrics_writer():
+    while running:
+        write_metrics()
+        time.sleep(WRITE_INTERVAL)
+    # Final write with heartbeat=0
+    write_metrics()
+
+HOSTNAME = socket.gethostname()
+# -------------------------------------------------------------
+# Main
+# -------------------------------------------------------------
+def main():
+    global client
+
+    log.info("=" * 50)
+    log.info(f"Edge Node starting")
+    log.info(f"Zone:        {ZONE}")
+    log.info(f"Broker:      {BROKER_IP}:{BROKER_PORT}")
+    log.info(f"Topic:       {TOPIC}")
+    log.info(f"Metrics:     {METRICS_FILE}")
+    log.info(f"Write every: {WRITE_INTERVAL}s")
+    log.info("=" * 50)
+
+    # Start metrics writer thread
+    writer_thread = threading.Thread(target=metrics_writer, daemon=True)
+    writer_thread.start()
+
+    # Setup MQTT client
+    client = mqtt.Client(
+        client_id=f"edge-node-{HOSTNAME}",
+        clean_session=True
+    )
+    client.on_connect    = on_connect
+    client.on_disconnect = on_disconnect
+    client.on_message    = on_message
+    client.on_subscribe  = on_subscribe
+
+    # Connect with retry loop
+    while running:
+        try:
+            client.connect(BROKER_IP, BROKER_PORT, keepalive=60)
+            break
+        except Exception as e:
+            log.warning(f"Cannot connect to broker: {e}. Retrying in 5s...")
+            time.sleep(5)
+
+    if not running:
+        return
+
+    # Start MQTT network loop
+    client.loop_start()
+
+    log.info("Edge node running. Waiting for sensor messages...")
+
+    # Main wait loop
+    while running:
+        time.sleep(1)
+
+    # Graceful shutdown
+    log.info("Stopping MQTT loop...")
+    client.loop_stop()
+    client.disconnect()
+    writer_thread.join(timeout=10)
+    log.info("Edge node stopped cleanly.")
+
+if __name__ == '__main__':
+    main()
+{% endraw %}

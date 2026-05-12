@@ -1,0 +1,197 @@
+---
+# =============================================================
+# Central Configuration — Observability Stack
+# All files in this project reference this config.
+# Update values here to apply changes across the entire system.
+# =============================================================
+
+# -------------------------------------------------------------
+# Host Machine (Ubuntu VMware Host running Docker)
+# -------------------------------------------------------------
+host:
+  user: lojain
+  home: /home/lojain
+  project_dir: /home/lojain/observability-stack
+
+# -------------------------------------------------------------
+# OpenStack Node IPs (LXC Containers)
+# -------------------------------------------------------------
+openstack:
+  controller:
+    hostname: controller
+    mgmt_ip: 10.0.0.11
+    api_ip: 10.20.0.2
+    bridge_ip: 192.168.122.55
+    proxy_port: 3128
+  compute1:
+    mgmt_ip: 10.0.0.31
+    bridge_ip: 192.168.122.199
+  compute2:
+    mgmt_ip: 10.0.0.32
+    bridge_ip: 192.168.122.18
+  network:
+    mgmt_ip: 10.0.0.21
+    bridge_ip: 192.168.122.127
+
+# -------------------------------------------------------------
+# OpenStack API Credentials (for Terraform + Ansible)
+# -------------------------------------------------------------
+  auth:
+    auth_url: http://10.20.0.2:5000/v3
+    project_name: edge-monitoring
+    username: edge-tf
+    password: edgepass
+    user_domain_name: Default
+    project_domain_name: Default
+    identity_api_version: 3
+
+# -------------------------------------------------------------
+# Edge Node VMs
+# -------------------------------------------------------------
+edge_nodes:
+  vm1:
+    name: edge-node-1
+    zone: zone1
+    availability_zone: nova:compute1
+    state: running
+  vm2:
+    name: edge-node-2
+    zone: zone2
+    availability_zone: nova:compute2
+    state: running
+  vm3:
+    name: edge-node-3
+    zone: standby                      # assigned dynamically at scale-out
+    availability_zone: nova:compute1
+    state: shutoff                     # powered off until emergency scale-out
+
+# -------------------------------------------------------------
+# Network Configuration
+# -------------------------------------------------------------
+network:
+  external_network: ExtNet
+  prefix: edge
+  subnet1:
+    cidr: 10.2.1.0/24
+    gateway: 10.2.1.1
+    allocation_start: 10.2.1.10
+    allocation_end: 10.2.1.50
+  subnet2:
+    cidr: 10.2.2.0/24
+    gateway: 10.2.2.1
+    allocation_start: 10.2.2.10
+    allocation_end: 10.2.2.50
+
+# -------------------------------------------------------------
+# VM Image and Flavor
+# -------------------------------------------------------------
+vm:
+  image: focal-server-cloudimg-amd64-vnx
+  flavor: m1.smaller
+  keypair: edge-key
+  keypair_path: ~/.ssh/edge-key.pem
+
+# -------------------------------------------------------------
+# MQTT Broker (Mosquitto running in Docker on host)
+# -------------------------------------------------------------
+mqtt:
+  broker_ip: 192.168.122.1             # Host bridge IP reachable from VMs
+  broker_port: 1883
+  keepalive: 60
+  topics:
+    zone1: sensors/zone1/#
+    zone2: sensors/zone2/#
+    zone3: sensors/zone3/#
+
+# -------------------------------------------------------------
+# IoT Sensor Configuration
+# -------------------------------------------------------------
+sensors:
+  total: 36                            # 12 per zone
+  per_zone: 12
+  types:
+    - temperature
+    - humidity
+    - light
+    - pressure
+  per_type: 3                          # 3 sensors of each type per zone
+  zones:
+    - zone1
+    - zone2
+    - zone3
+  publish_interval: 5                  # seconds between publishes (normal)
+  stress_interval: 1                   # seconds between publishes (stress test)
+
+# -------------------------------------------------------------
+# Alert Thresholds (SRE Graduated Response)
+# -------------------------------------------------------------
+thresholds:
+  warning:   60                        # % — notification only
+  moderate:  75                        # % — run edge-tune.yml
+  critical:  85                        # % — run load-redistribute.yml
+  emergency: 95                        # % — Human Override + out-scale.yml
+  heartbeat_absence: 30                # seconds before downtime alert fires
+  cooldown: 180                        # seconds between repeated actions (3 min)
+  human_override_timeout: 60           # seconds to wait for YES/NO reply
+
+# -------------------------------------------------------------
+# SLA and Error Budget Targets
+# -------------------------------------------------------------
+sla:
+  target: 99.9                         # % SLA target
+  error_budget_burn_rate_threshold: 2  # % burn rate per hour before proactive alert
+
+# -------------------------------------------------------------
+# Prometheus Configuration
+# -------------------------------------------------------------
+prometheus:
+  port: 9090
+  scrape_interval: 15s
+  node_exporter_port: 9100
+  data_retention: 30d
+
+# -------------------------------------------------------------
+# Grafana Configuration
+# -------------------------------------------------------------
+grafana:
+  port: 3000
+  admin_user: admin
+  admin_password: admin123
+
+# -------------------------------------------------------------
+# Alertmanager Configuration
+# -------------------------------------------------------------
+alertmanager:
+  port: 9093
+  n8n_webhook_url: http://n8n:5678/webhook/alerts
+
+# -------------------------------------------------------------
+# n8n Configuration
+# -------------------------------------------------------------
+n8n:
+  port: 5678
+  webhook_path: /webhook/alerts
+  sqlite_db: /home/node/.n8n/events.db
+
+# -------------------------------------------------------------
+# Telegram Bot (for Human Override notifications)
+# -------------------------------------------------------------
+telegram:
+  bot_token: "8721228429:AAH6RCxzGFEidOUngl0HnGx3fD4iIo82GQI"     # Replace with your bot token
+  chat_id: "6705672869"         # Replace with your chat ID
+
+# -------------------------------------------------------------
+# SSH Configuration
+# -------------------------------------------------------------
+ssh:
+  controller_user: root
+  vm_user: ubuntu
+  proxy_command: "ssh -W %h:%p -q root@192.168.122.55 -o StrictHostKeyChecking=no"
+
+# -------------------------------------------------------------
+# Squid Proxy (for VM internet access via Controller)
+# -------------------------------------------------------------
+proxy:
+  http: http://10.0.10.11:3128
+  https: http://10.0.10.11:3128
+...

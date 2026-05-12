@@ -1,0 +1,70 @@
+# =============================================================
+# Alertmanager Configuration
+# Routes all alerts to n8n webhook for intelligent processing
+# =============================================================
+
+global:
+  resolve_timeout: 5m
+
+# Routing tree
+route:
+  group_by: ['alertname', 'instance', 'severity']
+  group_wait:      10s
+  group_interval:  30s
+  repeat_interval: 3m
+  receiver: 'n8n-webhook'
+
+  # Route by severity — all go to n8n but with different grouping
+  routes:
+    - match:
+        severity: emergency
+      receiver: 'n8n-webhook'
+      group_wait: 5s
+      repeat_interval: 5m
+
+    - match:
+        severity: critical
+      receiver: 'n8n-webhook'
+      group_wait: 10s
+      repeat_interval: 7m
+
+    - match:
+        severity: moderate
+      receiver: 'n8n-webhook'
+      group_wait: 15s
+      repeat_interval: 10m
+
+    - match:
+        severity: warning
+      receiver: 'n8n-webhook'
+      group_wait: 30s
+      repeat_interval: 10m
+
+# Receivers
+receivers:
+  - name: 'n8n-webhook'
+    webhook_configs:
+      - url: 'http://n8n:5678/webhook/alerts'
+        send_resolved: true
+
+# Inhibition rules
+# Suppress lower severity alerts when higher severity is firing
+inhibit_rules:
+  - source_match:
+      severity: emergency
+    target_match_re:
+      severity: 'critical|moderate|warning'
+    equal: ['instance', 'zone']
+
+  - source_match:
+      severity: critical
+    target_match_re:
+      severity: 'moderate|warning'
+    equal: ['instance', 'zone']
+
+  - source_match:
+      severity: moderate
+    target_match:
+      severity: warning
+    equal: ['instance', 'zone']
+

@@ -1,0 +1,11 @@
+---
+# =============================================================
+# Edge Node Role Handlers
+# =============================================================
+
+- name: restart edge-node
+  systemd:
+    name: edge-node
+    state: restarted
+    daemon_reload: yes
+  become: yes
