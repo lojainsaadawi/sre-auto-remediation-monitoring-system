@@ -181,4 +181,3 @@ observability-stack/
 | Burn rate alert         | > 2x/hr |
 | Heartbeat absence alert | > 30s   |
 | Alert cooldown          | 3 min   |
-| Human override timeout  | 60s     |
