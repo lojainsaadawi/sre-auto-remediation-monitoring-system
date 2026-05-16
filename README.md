@@ -1,4 +1,4 @@
-# Observability Stack — Edge Monitoring System
+# Observability Stack — SRE and Auto-remediation Monitoring System
 
 ---
 
