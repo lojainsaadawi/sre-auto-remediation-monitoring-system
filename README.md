@@ -3,7 +3,7 @@
 ---
 
 ## Overview
-An intelligent SRE monitoring platform for simulated IoT/Edge computing on top of an OpenStack Antelope private cloud. The system monitors 36 virtual IoT sensors across 3 zones using a graduated alert response that escalates from local optimization all the way to autonomous VM scale-out.
+An intelligent SRE monitoring platform for simulated IoT on top of an OpenStack Antelope private cloud. The system monitors 36 virtual IoT sensors across 3 zones using a graduated alert response that escalates from local optimization all the way to autonomous VM scale-out.
 
 ---
 
